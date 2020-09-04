@@ -16,6 +16,8 @@ New language features
 * `ꜛ` (U+A71B), `ꜜ` (U+A71C) and `ꜝ` (U+A71D) can now also be used as operator
   suffixes. They can be tab-completed from `\^uparrow`, `\^downarrow` and `\^!` in the REPL
   ([#37542]).
+* The syntax `import A as B` (plus `import A: x as y`, etc.) can now be used to
+  rename imported modules and identifiers ([#1255]).
 
 Language changes
 ----------------
