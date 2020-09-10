@@ -75,9 +75,11 @@ function truncsfhf2(val::Float32)
     end
     reinterpret(Float16, h)
 end
-@ccallable Float16 __truncsfhf2(val::Float32) = truncsfhf2(val)
-@ccallable Float16 __gnu_f2h_ieee(val::Float32) = truncsfhf2(val)
-@ccallable Float16 __truncdfhf2(x::Float64) = truncsfhf2(Float32(x))
+if !Sys.isapple()
+    @ccallable Float16 __truncsfhf2(val::Float32) = truncsfhf2(val)
+    @ccallable Float16 __gnu_f2h_ieee(val::Float32) = truncsfhf2(val)
+    @ccallable Float16 __truncdfhf2(x::Float64) = truncsfhf2(Float32(x))
+end
 
 # extension
 function extendhfsf2(val::Float16)
@@ -121,8 +123,10 @@ function extendhfsf2(val::Float16)
     end
     return reinterpret(Float32, ret)
 end
-@ccallable Float32 __extendhfsf2(val::Float16) = extendhfsf2(val)
-@ccallable Float32 __gnu_h2f_ieee(val::Float16) = extendhfsf2(val)
+if !Sys.isapple()
+    @ccallable Float32 __extendhfsf2(val::Float16) = extendhfsf2(val)
+    @ccallable Float32 __gnu_h2f_ieee(val::Float16) = extendhfsf2(val)
+end
 @ccallable Float64 __extendhfdf2(x::Float16) = Float64(extendhfdf2(x))
 
 end
