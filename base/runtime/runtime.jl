@@ -2,7 +2,29 @@
 
 module Runtime
 
-using Base: @ccallable
+function _ccallable(rt::Type, sigt::Type)
+    ccall(:jl_extern_c, Cvoid, (Any, Any), rt, sigt)
+end
+
+# early version of `@ccallable`
+macro ccallable(rt, def)
+    sig = def.args[1]
+    f = :(typeof($(sig.args[1])))
+    at = map(sig.args[2:end]) do a
+        a.args[end]
+    end
+    return quote
+        $(esc(def))
+        _ccallable($(esc(rt)), $(Expr(:curly, :Tuple, esc(f), map(esc, at)...)))
+    end
+    return
+end
+
+# early version if `isapple()`
+#
+# Xcode links compiler-rt, so we shouldn't emit our implementation to avoid duplicate
+const KERNEL = ccall(:jl_get_UNAME, Any, ())
+isapple() = (KERNEL === :Apple || KERNEL === :Darwin)
 
 
 ## Float16 intrinsics

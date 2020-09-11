@@ -47,6 +47,42 @@ A not-a-number value of type [`Float64`](@ref).
 """
 NaN, NaN64
 
+# bit patterns
+reinterpret(::Type{Unsigned}, x::Float64) = reinterpret(UInt64, x)
+reinterpret(::Type{Unsigned}, x::Float32) = reinterpret(UInt32, x)
+reinterpret(::Type{Unsigned}, x::Float16) = reinterpret(UInt16, x)
+reinterpret(::Type{Signed}, x::Float64) = reinterpret(Int64, x)
+reinterpret(::Type{Signed}, x::Float32) = reinterpret(Int32, x)
+reinterpret(::Type{Signed}, x::Float16) = reinterpret(Int16, x)
+
+sign_mask(::Type{Float64}) =        0x8000_0000_0000_0000
+exponent_mask(::Type{Float64}) =    0x7ff0_0000_0000_0000
+exponent_one(::Type{Float64}) =     0x3ff0_0000_0000_0000
+exponent_half(::Type{Float64}) =    0x3fe0_0000_0000_0000
+significand_mask(::Type{Float64}) = 0x000f_ffff_ffff_ffff
+
+sign_mask(::Type{Float32}) =        0x8000_0000
+exponent_mask(::Type{Float32}) =    0x7f80_0000
+exponent_one(::Type{Float32}) =     0x3f80_0000
+exponent_half(::Type{Float32}) =    0x3f00_0000
+significand_mask(::Type{Float32}) = 0x007f_ffff
+
+sign_mask(::Type{Float16}) =        0x8000
+exponent_mask(::Type{Float16}) =    0x7c00
+exponent_one(::Type{Float16}) =     0x3c00
+exponent_half(::Type{Float16}) =    0x3800
+significand_mask(::Type{Float16}) = 0x03ff
+
+for T in (Float16, Float32, Float64)
+    @eval significand_bits(::Type{$T}) = $(trailing_ones(significand_mask(T)))
+    @eval exponent_bits(::Type{$T}) = $(sizeof(T)*8 - significand_bits(T) - 1)
+    @eval exponent_bias(::Type{$T}) = $(Int(exponent_one(T) >> significand_bits(T)))
+    # maximum float exponent
+    @eval exponent_max(::Type{$T}) = $(Int(exponent_mask(T) >> significand_bits(T)) - exponent_bias(T))
+    # maximum float exponent without bias
+    @eval exponent_raw_max(::Type{$T}) = $(Int(exponent_mask(T) >> significand_bits(T)))
+end
+
 ## conversions to floating-point ##
 
 for t1 in (Float16, Float32, Float64)
@@ -737,42 +773,6 @@ eps(::AbstractFloat)
 
 ## byte order swaps for arbitrary-endianness serialization/deserialization ##
 bswap(x::IEEEFloat) = bswap_int(x)
-
-# bit patterns
-reinterpret(::Type{Unsigned}, x::Float64) = reinterpret(UInt64, x)
-reinterpret(::Type{Unsigned}, x::Float32) = reinterpret(UInt32, x)
-reinterpret(::Type{Unsigned}, x::Float16) = reinterpret(UInt16, x)
-reinterpret(::Type{Signed}, x::Float64) = reinterpret(Int64, x)
-reinterpret(::Type{Signed}, x::Float32) = reinterpret(Int32, x)
-reinterpret(::Type{Signed}, x::Float16) = reinterpret(Int16, x)
-
-sign_mask(::Type{Float64}) =        0x8000_0000_0000_0000
-exponent_mask(::Type{Float64}) =    0x7ff0_0000_0000_0000
-exponent_one(::Type{Float64}) =     0x3ff0_0000_0000_0000
-exponent_half(::Type{Float64}) =    0x3fe0_0000_0000_0000
-significand_mask(::Type{Float64}) = 0x000f_ffff_ffff_ffff
-
-sign_mask(::Type{Float32}) =        0x8000_0000
-exponent_mask(::Type{Float32}) =    0x7f80_0000
-exponent_one(::Type{Float32}) =     0x3f80_0000
-exponent_half(::Type{Float32}) =    0x3f00_0000
-significand_mask(::Type{Float32}) = 0x007f_ffff
-
-sign_mask(::Type{Float16}) =        0x8000
-exponent_mask(::Type{Float16}) =    0x7c00
-exponent_one(::Type{Float16}) =     0x3c00
-exponent_half(::Type{Float16}) =    0x3800
-significand_mask(::Type{Float16}) = 0x03ff
-
-for T in (Float16, Float32, Float64)
-    @eval significand_bits(::Type{$T}) = $(trailing_ones(significand_mask(T)))
-    @eval exponent_bits(::Type{$T}) = $(sizeof(T)*8 - significand_bits(T) - 1)
-    @eval exponent_bias(::Type{$T}) = $(Int(exponent_one(T) >> significand_bits(T)))
-    # maximum float exponent
-    @eval exponent_max(::Type{$T}) = $(Int(exponent_mask(T) >> significand_bits(T)) - exponent_bias(T))
-    # maximum float exponent without bias
-    @eval exponent_raw_max(::Type{$T}) = $(Int(exponent_mask(T) >> significand_bits(T)))
-end
 
 # integer size of float
 uinttype(::Type{Float64}) = UInt64

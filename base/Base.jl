@@ -115,6 +115,10 @@ using .Iterators: Flatten, Filter, product  # for generators
 
 include("namedtuple.jl")
 
+# run-time library
+include("runtime/runtime.jl")
+using .Runtime
+
 # numeric operations
 include("hashing.jl")
 include("rounding.jl")
@@ -219,10 +223,6 @@ include("version.jl")
 include("sysinfo.jl")
 include("libc.jl")
 using .Libc: getpid, gethostname, time
-
-# run-time library
-include("runtime/runtime.jl")
-using .Runtime
 
 include("env.jl")
 
