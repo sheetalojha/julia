@@ -29,6 +29,11 @@ isapple() = (KERNEL === :Apple || KERNEL === :Darwin)
 
 ## Float16 intrinsics
 
+# note that we can't actually use Float16 in these implementations, as LLVM will happily
+# lower, e.g., `reinterpret(Float16, ::UInt16)` / `bitcast i16 to half` to `truncsfhf2`
+# because it wants to store the `half` in a single-precision register. this causes recursion
+# when compiling these intrinsics. LLVM's compiler-rt similarly returns i16 for Float16.
+
 # Float32 -> Float16 algorithm from:
 #   "Fast Half Float Conversion" by Jeroen van der Zijp
 #   ftp://ftp.fox-toolkit.org/pub/fasthalffloatconversion.pdf
@@ -73,9 +78,9 @@ end
 # truncation
 function truncsfhf2(val::Float32)
     f = reinterpret(UInt32, val)
-    if isnan(val)
+    if f&0x7fffffff > 0x7f800000  # isnan without reinterpreting as Float32
         t = 0x8000 ⊻ (0x8000 & ((f >> 0x10) % UInt16))
-        return reinterpret(Float16, t ⊻ ((f >> 0xd) % UInt16))
+        return t ⊻ ((f >> 0xd) % UInt16)
     end
     i = ((f & ~Base.significand_mask(Float32)) >> Base.significand_bits(Float32)) + 1
     @inbounds sh = shifttable[i]
@@ -95,17 +100,18 @@ function truncsfhf2(val::Float32)
             h += UInt16(1)
         end
     end
-    reinterpret(Float16, h)
+    h
 end
-if !Sys.isapple()
-    @ccallable Float16 __truncsfhf2(val::Float32) = truncsfhf2(val)
-    @ccallable Float16 __gnu_f2h_ieee(val::Float32) = truncsfhf2(val)
-    @ccallable Float16 __truncdfhf2(x::Float64) = truncsfhf2(Float32(x))
+truncdfhf2(x::Float64) = truncsfhf2(Float32(x))
+if !isapple()
+    @ccallable UInt16 __truncsfhf2(val::Float32) = truncsfhf2(val)
+    @ccallable UInt16 __gnu_f2h_ieee(val::Float32) = truncsfhf2(val)
+    @ccallable UInt16 __truncdfhf2(val::Float64) = truncdfhf2(val)
 end
 
 # extension
-function extendhfsf2(val::Float16)
-    local ival::UInt32 = reinterpret(UInt16, val)
+function extendhfsf2(val::UInt16)
+    local ival::UInt32 = val
     local sign::UInt32 = (ival & 0x8000) >> 15
     local exp::UInt32  = (ival & 0x7c00) >> 10
     local sig::UInt32  = (ival & 0x3ff) >> 0
@@ -143,12 +149,13 @@ function extendhfsf2(val::Float16)
         sig  = sig << (23 - 10)
         ret = sign | exp | sig
     end
-    return reinterpret(Float32, ret)
+    reinterpret(Float32, ret)
 end
-if !Sys.isapple()
-    @ccallable Float32 __extendhfsf2(val::Float16) = extendhfsf2(val)
-    @ccallable Float32 __gnu_h2f_ieee(val::Float16) = extendhfsf2(val)
+extendhfdf2(x::UInt16) = Float64(extendhfsf2(x))
+if !isapple()
+    @ccallable Float32 __extendhfsf2(val::UInt16) = extendhfsf2(val)
+    @ccallable Float32 __gnu_h2f_ieee(val::UInt16) = extendhfsf2(val)
 end
-@ccallable Float64 __extendhfdf2(x::Float16) = Float64(extendhfdf2(x))
+@ccallable Float32 __extendhfdf2(val::UInt16) = extendhfdf2(val)
 
 end
