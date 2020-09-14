@@ -2340,3 +2340,12 @@ if isodd(1) && all(iseven(2) for c in ())
 else
     @test false
 end
+
+# issue #37540
+macro m37540()
+    quote
+        x = 1
+        :($x)
+    end
+end
+@test @m37540() == 1
