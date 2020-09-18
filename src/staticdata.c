@@ -101,6 +101,9 @@ static int backref_table_numel;
 static arraylist_t layout_table;
 static arraylist_t builtin_typenames;
 
+// # of typenames whose caches are treated as weak references
+#define NUM_BUILTIN_TYPENAMES 9
+
 // list of (size_t pos, (void *f)(jl_value_t*)) entries
 // for the serializer to mark values in need of rework by function f
 // during deserialization later
@@ -259,8 +262,8 @@ static uintptr_t jl_fptr_id(void *fptr)
         return *(uintptr_t*)pbp;
 }
 
-#define jl_serialize_value(s, v) jl_serialize_value_(s,(jl_value_t*)(v))
-static void jl_serialize_value_(jl_serializer_state *s, jl_value_t *v);
+#define jl_serialize_value(s, v) jl_serialize_value_(s,(jl_value_t*)(v),1)
+static void jl_serialize_value_(jl_serializer_state *s, jl_value_t *v, int recursive);
 
 
 static void jl_serialize_module(jl_serializer_state *s, jl_module_t *m)
@@ -287,7 +290,7 @@ static void jl_serialize_module(jl_serializer_state *s, jl_module_t *m)
 
 #define NBOX_C 1024
 
-static void jl_serialize_value_(jl_serializer_state *s, jl_value_t *v)
+static void jl_serialize_value_(jl_serializer_state *s, jl_value_t *v, int recursive)
 {
     // ignore items that are given a special representation
     if (v == NULL || jl_is_symbol(v)) {
@@ -331,6 +334,8 @@ static void jl_serialize_value_(jl_serializer_state *s, jl_value_t *v)
         // skip it
     }
     else if (jl_is_svec(v)) {
+        if (!recursive)
+            return;
         size_t i, l = jl_svec_len(v);
         jl_value_t **data = jl_svec_data(v);
         for (i = 0; i < l; i++) {
@@ -365,6 +370,25 @@ static void jl_serialize_value_(jl_serializer_state *s, jl_value_t *v)
     }
     else if (jl_typeis(v, jl_module_type)) {
         jl_serialize_module(s, (jl_module_t*)v);
+    }
+    else if (jl_is_typename(v)) {
+        jl_typename_t *tn = (jl_typename_t*)v;
+        size_t i;
+        int is_builtin = 0;
+        for (i = 0; i < builtin_typenames.len; i++) {
+            if (tn == (jl_typename_t*)builtin_typenames.items[i]) {
+                is_builtin = 1;
+                break;
+            }
+        }
+        jl_serialize_value(s, tn->name);
+        jl_serialize_value(s, tn->module);
+        jl_serialize_value(s, tn->names);
+        jl_serialize_value(s, tn->wrapper);
+        jl_serialize_value_(s, (jl_value_t*)tn->cache, !is_builtin);
+        jl_serialize_value_(s, (jl_value_t*)tn->linearcache, !is_builtin);
+        jl_serialize_value(s, tn->mt);
+        jl_serialize_value(s, tn->partial);
     }
     else if (t->layout->nfields > 0) {
         char *data = (char*)jl_data_ptr(v);
@@ -1235,7 +1259,7 @@ static void jl_finalize_serializer(jl_serializer_state *s, arraylist_t *list)
 }
 
 
-static void jl_reinit_item(jl_value_t *v, int how)
+static void jl_reinit_item(jl_value_t *v, int how) JL_GC_DISABLED
 {
     switch (how) {
         case 1: { // rehash IdDict
@@ -1280,7 +1304,7 @@ static void jl_reinit_item(jl_value_t *v, int how)
 }
 
 
-static void jl_finalize_deserializer(jl_serializer_state *s)
+static void jl_finalize_deserializer(jl_serializer_state *s) JL_GC_DISABLED
 {
     // run reinitialization functions
     uintptr_t base = (uintptr_t)&s->s->buf[0];
@@ -1304,7 +1328,7 @@ static void jl_prune_type_cache(jl_svec_t *cache)
     for (i = 0; i < l; i++) {
         jl_value_t *ti = jl_svecref(cache, i);
         if (ti == NULL)
-            break;
+            continue;
         if (ptrhash_get(&backref_table, ti) != HT_NOTFOUND || jl_get_llvm_gv(native_functions, ti) != 0)
             jl_svecset(cache, ins++, ti);
         else if (jl_is_datatype(ti)) {
@@ -1324,8 +1348,9 @@ static void jl_prune_type_cache(jl_svec_t *cache)
 
 static void jl_init_serializer2(int);
 static void jl_cleanup_serializer2(void);
+static void init_builtin_typenames(void);
 
-static void jl_save_system_image_to_stream(ios_t *f)
+static void jl_save_system_image_to_stream(ios_t *f) JL_GC_DISABLED
 {
     jl_gc_collect(JL_GC_FULL);
     jl_gc_collect(JL_GC_INCREMENTAL);   // sweep finalizers
@@ -1376,15 +1401,11 @@ static void jl_save_system_image_to_stream(ios_t *f)
             jl_value_t *tag = *tags[i];
             jl_serialize_value(&s, tag);
         }
+        // prune unused entries from built-in type caches
         for (i = 0; i < builtin_typenames.len; i++) {
             jl_typename_t *tn = (jl_typename_t*)builtin_typenames.items[i];
             jl_prune_type_cache(tn->cache);
             jl_prune_type_cache(tn->linearcache);
-        }
-        for (i = 0; i < builtin_typenames.len; i++) {
-            jl_typename_t *tn = (jl_typename_t*)builtin_typenames.items[i];
-            jl_serialize_value(&s, tn->cache);
-            jl_serialize_value(&s, tn->linearcache);
         }
     }
 
@@ -1509,7 +1530,7 @@ JL_DLLEXPORT void jl_set_sysimg_so(void *handle)
     sysimg_fptrs = jl_init_processor_sysimg(handle);
 }
 
-static void jl_restore_system_image_from_stream(ios_t *f)
+static void jl_restore_system_image_from_stream(ios_t *f) JL_GC_DISABLED
 {
     JL_TIMING(SYSIMG_LOAD);
     int en = jl_gc_enable(0);
@@ -1597,6 +1618,11 @@ static void jl_restore_system_image_from_stream(ios_t *f)
     s.s = NULL;
 
     s.s = f;
+    init_builtin_typenames();
+    for (i = 0; i < builtin_typenames.len; i++) {
+        jl_typename_t *tn = (jl_typename_t*)builtin_typenames.items[i];
+        jl_rehash_type_cache(tn);
+    }
     // reinit items except ccallables
     jl_finalize_deserializer(&s);
     s.s = NULL;
@@ -1680,13 +1706,28 @@ JL_DLLEXPORT void jl_restore_system_image_data(const char *buf, size_t len)
 
 // --- init ---
 
+static void init_builtin_typenames(void)
+{
+    arraylist_new(&builtin_typenames, NUM_BUILTIN_TYPENAMES);
+    arraylist_push(&builtin_typenames, jl_array_typename);
+    arraylist_push(&builtin_typenames, ((jl_datatype_t*)jl_ref_type->body)->name);
+    arraylist_push(&builtin_typenames, jl_pointer_typename);
+    arraylist_push(&builtin_typenames, jl_type_typename);
+    arraylist_push(&builtin_typenames, ((jl_datatype_t*)jl_unwrap_unionall((jl_value_t*)jl_abstractarray_type))->name);
+    arraylist_push(&builtin_typenames, ((jl_datatype_t*)jl_unwrap_unionall((jl_value_t*)jl_densearray_type))->name);
+    arraylist_push(&builtin_typenames, jl_tuple_typename);
+    arraylist_push(&builtin_typenames, jl_vararg_typename);
+    arraylist_push(&builtin_typenames, jl_namedtuple_typename);
+    assert(builtin_typenames.len == NUM_BUILTIN_TYPENAMES);
+}
+
 static void jl_init_serializer2(int for_serialize)
 {
     if (for_serialize) {
         htable_new(&symbol_table, 0);
         htable_new(&fptr_to_id, sizeof(id_to_fptrs) / sizeof(*id_to_fptrs));
         htable_new(&backref_table, 0);
-        arraylist_new(&builtin_typenames, 0);
+        init_builtin_typenames();
         uintptr_t i;
         for (i = 0; id_to_fptrs[i] != NULL; i++) {
             ptrhash_put(&fptr_to_id, (void*)(uintptr_t)id_to_fptrs[i], (void*)(i + 2));
