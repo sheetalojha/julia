@@ -125,7 +125,7 @@ Test = get(Base.loaded_modules,
 if Test !== nothing
     hardcoded_precompile_statements *= """
     @assert precompile(Tuple{typeof(Test.do_test), Test.ExecutionResult, Any})
-    @assert precompile(Tuple{typeof(testset_beginend), Tuple{String, Expr}, Expr, LineNumberNode})
+    @assert precompile(Tuple{typeof(Test.testset_beginend), Tuple{String, Expr}, Expr, LineNumberNode})
     @assert precompile(Tuple{typeof(Test.finish), Test.DefaultTestSet})
     @assert precompile(Tuple{typeof(Test.eval_test), Expr, Expr, LineNumberNode, Bool})
     """
