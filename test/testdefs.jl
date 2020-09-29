@@ -37,9 +37,11 @@ function runtests(name, path, isolate=true; seed=nothing)
                                  res_and_time_data[4],
                                  res_and_time_data[5])
         end
-        vcat(collect(res_and_time_data), rss)
-    finally
+        vcat(@show(collect(res_and_time_data)), rss)
+    catch
         Test.TESTSET_PRINT_ENABLE[] = old_print_setting
+        msg = sprint(Base.show_task_exception, current_task())
+        Any[ErrorException(msg)]
     end
 end
 
